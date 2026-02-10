@@ -1,0 +1,119 @@
+:root {
+  --bg: #f7f7f2;
+  --panel: #ffffff;
+  --ink: #161616;
+  --ink-soft: #4f4f4f;
+  --accent: #0f766e;
+  --accent-ink: #ffffff;
+  --border: #d9d9cf;
+  --ok: #166534;
+  --error: #b91c1c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  background: radial-gradient(circle at top right, #ecfdf5 0%, var(--bg) 55%);
+  color: var(--ink);
+  width: 340px;
+}
+
+.container {
+  padding: 16px;
+}
+
+h1 {
+  font-size: 18px;
+  margin: 0 0 4px;
+}
+
+.subtitle {
+  margin: 0 0 14px;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.controls {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+}
+
+select,
+button {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  font-size: 14px;
+}
+
+select {
+  background: var(--panel);
+  color: var(--ink);
+  padding: 9px 10px;
+}
+
+.actions {
+  display: grid;
+  gap: 8px;
+}
+
+button {
+  padding: 10px 12px;
+  font-weight: 600;
+  cursor: pointer;
+  background: #fafaf8;
+  color: var(--ink);
+}
+
+button:hover:not(:disabled) {
+  filter: brightness(0.98);
+}
+
+button:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+button.active {
+  background: #fef3c7;
+  border-color: #f59e0b;
+  color: #7c2d12;
+}
+
+.status {
+  min-height: 20px;
+  margin: 10px 0 4px;
+  font-size: 12px;
+}
+
+.status.ok {
+  color: var(--ok);
+}
+
+.status.error {
+  color: var(--error);
+}
+
+.hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ink-soft);
+}

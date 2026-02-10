@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Screenshot Preview</title>
+    <link rel="stylesheet" href="preview.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="topbar">
+        <div>
+          <h1>Screenshot Preview</h1>
+          <p id="meta" class="meta"></p>
+        </div>
+        <span id="modeChip" class="chip"></span>
+      </header>
+
+      <section class="actions">
+        <button id="copyBtn" class="primary">Copy Image</button>
+        <button id="downloadBtn">Download</button>
+        <button id="closeBtn">Close</button>
+      </section>
+
+      <p id="status" class="status" aria-live="polite"></p>
+
+      <section class="preview-wrap">
+        <img id="previewImage" alt="Screenshot preview" />
+      </section>
+    </main>
+
+    <script src="preview.js"></script>
+  </body>
+</html>

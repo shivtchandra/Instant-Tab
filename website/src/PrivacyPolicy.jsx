@@ -76,7 +76,7 @@ function PrivacyPolicy() {
                     <h2>Contact Us</h2>
                     <p>
                         If you have any questions about this Privacy Policy, please contact us at:
-                        <a href="mailto:support@instanttab.com" className="link">support@instanttab.com</a>
+                        <a href="mailto:shivachandra9490@gmail.com" className="link">shivachandra9490@gmail.com</a>
                     </p>
                 </section>
 

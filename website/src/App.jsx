@@ -1,10 +1,22 @@
 import React from "react";
+import { Routes, Route, Link, useLocation } from "react-router-dom";
+import PrivacyPolicy from "./PrivacyPolicy";
+
+function ScrollToTop() {
+  const { pathname } = useLocation();
+
+  React.useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
+
+  return null;
+}
 
 const navLinks = [
-  { name: "Features", href: "#features" },
-  { name: "Workflow", href: "#workflow" },
-  { name: "FAQ", href: "#faq" },
-  { name: "Docs", href: "#docs" },
+  { name: "Features", href: "/#features" },
+  { name: "Workflow", href: "/#workflow" },
+  { name: "FAQ", href: "/#faq" },
+  { name: "Docs", href: "/#docs" },
 ];
 
 const features = [
@@ -77,20 +89,29 @@ const faqs = [
 ];
 
 function Navbar() {
+  const location = useLocation();
+  const isHome = location.pathname === "/";
+
   return (
     <nav className="navbar glass">
-      <a href="#" className="logo">
+      <Link to="/" className="logo">
         <img src="/assets/store-icon.png" alt="Logo" />
         <span className="logo-text">Instant Tab</span>
-      </a>
+      </Link>
       <div className="nav-links">
         {navLinks.map((link) => (
-          <a key={link.name} href={link.href}>
-            {link.name}
-          </a>
+          isHome ? (
+            <a key={link.name} href={link.href.replace("/", "")}>
+              {link.name}
+            </a>
+          ) : (
+            <Link key={link.name} to={link.href}>
+              {link.name}
+            </Link>
+          )
         ))}
       </div>
-      <a href="#download" className="btn btn-primary">
+      <a href="/#download" className="btn btn-primary">
         Get Extension
       </a>
     </nav>
@@ -178,31 +199,51 @@ function FAQ() {
   );
 }
 
+function Home() {
+  return (
+    <main>
+      <Hero />
+      <Features />
+      <Workflow />
+      <FAQ />
+      <section id="download" className="container section-padding">
+        <div className="cta-banner">
+          <h2 className="text-gradient">Ready to supercharge your workflow?</h2>
+          <p>Join thousands of users who capture the web with Instant Tab Screenshot.</p>
+          <a href="#download" className="btn btn-primary" style={{ padding: "1rem 2rem", fontSize: "1.1rem" }}>
+            Add to Chrome — It's Free
+          </a>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 function Footer() {
   return (
     <footer>
       <div className="container">
         <div className="footer-grid">
           <div className="footer-brand">
-            <a href="#" className="logo">
+            <Link to="/" className="logo">
               <img src="/assets/store-icon.png" alt="Logo" />
               <span className="logo-text">Instant Tab</span>
-            </a>
+            </Link>
             <p>Built for professionals who need speed and reliability in their screenshot workflow.</p>
           </div>
           <div className="footer-column">
             <h4>Product</h4>
             <ul>
-              <li><a href="#features">Features</a></li>
-              <li><a href="#workflow">Workflow</a></li>
-              <li><a href="#docs">Documentation</a></li>
+              <li><a href="/#features">Features</a></li>
+              <li><a href="/#workflow">Workflow</a></li>
+              <li><a href="/#docs">Documentation</a></li>
             </ul>
           </div>
           <div className="footer-column">
             <h4>Resources</h4>
             <ul>
               <li><a href="#">Support</a></li>
-              <li><a href="#">Privacy Policy</a></li>
+              <li><Link to="/privacy">Privacy Policy</Link></li>
               <li><a href="#">Terms of Service</a></li>
             </ul>
           </div>
@@ -227,22 +268,12 @@ function Footer() {
 function App() {
   return (
     <div className="page-wrapper">
+      <ScrollToTop />
       <Navbar />
-      <main>
-        <Hero />
-        <Features />
-        <Workflow />
-        <FAQ />
-        <section className="container section-padding">
-          <div className="cta-banner">
-            <h2 className="text-gradient">Ready to supercharge your workflow?</h2>
-            <p>Join thousands of users who capture the web with Instant Tab Screenshot.</p>
-            <a href="#download" className="btn btn-primary" style={{ padding: "1rem 2rem", fontSize: "1.1rem" }}>
-              Add to Chrome — It's Free
-            </a>
-          </div>
-        </section>
-      </main>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/privacy" element={<PrivacyPolicy />} />
+      </Routes>
       <Footer />
     </div>
   );

@@ -1,11 +1,14 @@
 const formatSelect = document.getElementById("format");
 const downloadBtn = document.getElementById("downloadBtn");
+const delayedBtn = document.getElementById("delayedBtn");
 const areaBtn = document.getElementById("areaBtn");
 const fullPageBtn = document.getElementById("fullPageBtn");
 const extendedBtn = document.getElementById("extendedBtn");
 const statusEl = document.getElementById("status");
 
 const JPEG_QUALITY = 92;
+const DROPDOWN_DELAY_MS = 3000;
+const NO_PAYLOAD = Symbol("NO_PAYLOAD");
 let extendedActive = false;
 
 function setStatus(message, type = "") {
@@ -15,6 +18,7 @@ function setStatus(message, type = "") {
 
 function setButtonsDisabled(disabled) {
   downloadBtn.disabled = disabled;
+  delayedBtn.disabled = disabled;
   areaBtn.disabled = disabled;
   fullPageBtn.disabled = disabled;
   extendedBtn.disabled = disabled;
@@ -31,10 +35,10 @@ function getPayload() {
   return payload;
 }
 
-function sendMessage(type, withPayload = true) {
+function sendMessage(type, payload = undefined) {
   const message = { type };
-  if (withPayload) {
-    message.payload = getPayload();
+  if (payload !== undefined) {
+    message.payload = payload;
   }
 
   return chrome.runtime.sendMessage(message);
@@ -52,7 +56,7 @@ function refreshExtendedButton() {
 
 async function loadExtendedState() {
   try {
-    const response = await sendMessage("GET_EXTENDED_STATE", false);
+    const response = await sendMessage("GET_EXTENDED_STATE");
     extendedActive = Boolean(response?.active);
     refreshExtendedButton();
   } catch {
@@ -61,12 +65,15 @@ async function loadExtendedState() {
   }
 }
 
-async function runAction(type, loadingLabel, successLabel, withPayload = true) {
+async function runAction(type, loadingLabel, successLabel, payload = undefined) {
   setButtonsDisabled(true);
   setStatus(loadingLabel);
 
   try {
-    const response = await sendMessage(type, withPayload);
+    const effectivePayload = payload === undefined ? getPayload() : payload;
+    const response = effectivePayload === NO_PAYLOAD
+      ? await sendMessage(type)
+      : await sendMessage(type, effectivePayload);
     if (!response?.ok) {
       throw new Error(response?.error || "Capture failed");
     }
@@ -99,6 +106,24 @@ downloadBtn.addEventListener("click", async () => {
     "Capturing visible area...",
     () => "Preview opened. Copy or download from preview."
   );
+});
+
+delayedBtn.addEventListener("click", () => {
+  const payload = {
+    ...getPayload(),
+    delayMs: DROPDOWN_DELAY_MS
+  };
+
+  setStatus("Timer started (3s). Reopen dropdown now...", "ok");
+  chrome.runtime.sendMessage({
+    type: "CAPTURE_DELAYED_VISIBLE",
+    payload
+  }).catch(() => {
+    // Ignore here; capture errors are shown when service worker responds/opens preview.
+  });
+
+  // Close immediately so page keeps focus and dropdown can be reopened before capture.
+  window.close();
 });
 
 areaBtn.addEventListener("click", async () => {
@@ -137,7 +162,7 @@ extendedBtn.addEventListener("click", async () => {
     "FINISH_EXTENDED_CAPTURE",
     "Finishing and stitching extended capture...",
     (result) => `Preview opened (${result.frameCount} frames). Copy or download there.`,
-    false
+    NO_PAYLOAD
   );
 
   if (response?.ok) {

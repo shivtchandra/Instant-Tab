@@ -2,9 +2,14 @@ const DEFAULT_FORMAT = "png";
 const MAX_CANVAS_EDGE = 32767;
 const FULL_PAGE_SCROLL_DELAY_MS = 160;
 const EXTENDED_DEDUPE_PX = 24;
-const EXTENDED_MIN_STEP_RATIO = 0.08;
+const EXTENDED_MIN_STEP_PX = 1;
 const EXTENDED_MAX_PENDING_REQUESTS = 12;
+const STITCH_ALIGNMENT_SEARCH_CSS = 96;
+const STITCH_ALIGNMENT_STRIP_CSS = 56;
+const STITCH_ALIGNMENT_SAMPLE_WIDTH = 320;
+const STITCH_ALIGNMENT_SAMPLE_STEP_X = 3;
 const PREVIEW_RETENTION_MS = 10 * 60 * 1000;
+const DEFAULT_DELAY_MS = 3000;
 
 const extendedSessions = new Map();
 const previewPayloads = new Map();
@@ -149,6 +154,41 @@ async function captureAndDownload({ format = DEFAULT_FORMAT, quality } = {}) {
   await openPreviewTab({ dataUrl, filename, mode: "visible" });
 
   return buildCaptureResponse({ filename, mode: "visible" });
+}
+
+function sanitizeDelayMs(delayMs) {
+  const value = Number(delayMs);
+  if (!Number.isFinite(value)) {
+    return DEFAULT_DELAY_MS;
+  }
+
+  return Math.max(500, Math.min(15000, Math.round(value)));
+}
+
+async function captureVisibleWithDelay({ format = DEFAULT_FORMAT, quality, delayMs } = {}) {
+  const tab = await getActiveTab();
+  const effectiveDelayMs = sanitizeDelayMs(delayMs);
+
+  await wait(effectiveDelayMs);
+
+  const targetTab = await chrome.tabs.get(tab.id).catch(() => null);
+  if (!targetTab) {
+    throw new Error("Target tab is no longer available for delayed capture.");
+  }
+
+  const dataUrl = await captureVisibleTab({
+    windowId: tab.windowId,
+    format,
+    quality
+  });
+
+  const filename = buildFilename(format, "visible");
+  await openPreviewTab({ dataUrl, filename, mode: "visible-delay" });
+
+  return {
+    ...buildCaptureResponse({ filename, mode: "visible-delay" }),
+    delayMs: effectiveDelayMs
+  };
 }
 
 async function captureAndPreview({ format = DEFAULT_FORMAT, quality } = {}) {
@@ -470,6 +510,129 @@ async function getCurrentPageSnapshot(tabId) {
   });
 }
 
+function buildLumaSample(bitmap) {
+  const sampleWidth = Math.max(
+    1,
+    Math.min(bitmap.width, STITCH_ALIGNMENT_SAMPLE_WIDTH)
+  );
+  const sampleHeight = Math.max(
+    1,
+    Math.round(bitmap.height * (sampleWidth / bitmap.width))
+  );
+  const canvas = new OffscreenCanvas(sampleWidth, sampleHeight);
+  const context = canvas.getContext("2d", {
+    alpha: false,
+    willReadFrequently: true
+  });
+
+  if (!context) {
+    return null;
+  }
+
+  context.drawImage(bitmap, 0, 0, sampleWidth, sampleHeight);
+  const data = context.getImageData(0, 0, sampleWidth, sampleHeight).data;
+  const luma = new Uint8Array(sampleWidth * sampleHeight);
+
+  for (let pixel = 0, outIndex = 0; pixel < data.length; pixel += 4, outIndex += 1) {
+    const r = data[pixel];
+    const g = data[pixel + 1];
+    const b = data[pixel + 2];
+    luma[outIndex] = (r * 77 + g * 150 + b * 29) >> 8;
+  }
+
+  return {
+    width: sampleWidth,
+    height: sampleHeight,
+    scaleY: sampleHeight / bitmap.height,
+    luma
+  };
+}
+
+function scoreLumaOverlap({ prevSample, nextSample, cutRow, stripRows }) {
+  const width = Math.min(prevSample.width, nextSample.width);
+  const prevStart = prevSample.height - stripRows;
+  const nextStart = cutRow - stripRows;
+  let total = 0;
+  let samples = 0;
+
+  for (let y = 0; y < stripRows; y += 1) {
+    const prevRow = (prevStart + y) * prevSample.width;
+    const nextRow = (nextStart + y) * nextSample.width;
+
+    for (let x = 0; x < width; x += STITCH_ALIGNMENT_SAMPLE_STEP_X) {
+      const diff = prevSample.luma[prevRow + x] - nextSample.luma[nextRow + x];
+      total += Math.abs(diff);
+      samples += 1;
+    }
+  }
+
+  return samples > 0 ? total / samples : Number.POSITIVE_INFINITY;
+}
+
+function findAlignedSourceY({
+  prevSample,
+  nextSample,
+  expectedSourceY,
+  minSourceY,
+  maxSourceY
+}) {
+  if (!prevSample || !nextSample) {
+    return expectedSourceY;
+  }
+
+  const expectedCut = clamp(
+    Math.round(expectedSourceY * nextSample.scaleY),
+    1,
+    nextSample.height - 1
+  );
+  const minCut = clamp(
+    Math.round(minSourceY * nextSample.scaleY),
+    1,
+    nextSample.height - 1
+  );
+  const maxCut = clamp(
+    Math.round(maxSourceY * nextSample.scaleY),
+    1,
+    nextSample.height - 1
+  );
+  const low = Math.min(minCut, maxCut);
+  const high = Math.max(minCut, maxCut);
+
+  if (low >= high) {
+    return expectedSourceY;
+  }
+
+  const baseStripRows = clamp(
+    Math.round(STITCH_ALIGNMENT_STRIP_CSS * nextSample.scaleY),
+    6,
+    Math.max(6, Math.min(prevSample.height - 1, nextSample.height - 1))
+  );
+  let bestCut = expectedCut;
+  let bestScore = Number.POSITIVE_INFINITY;
+
+  for (let cut = low; cut <= high; cut += 1) {
+    const stripRows = Math.min(baseStripRows, prevSample.height - 1, cut);
+    if (stripRows < 4) {
+      continue;
+    }
+
+    const score = scoreLumaOverlap({
+      prevSample,
+      nextSample,
+      cutRow: cut,
+      stripRows
+    });
+
+    if (score < bestScore) {
+      bestScore = score;
+      bestCut = cut;
+    }
+  }
+
+  const aligned = Math.round(bestCut / nextSample.scaleY);
+  return clamp(aligned, minSourceY, maxSourceY);
+}
+
 async function stitchFramesToDataUrl({ frames, viewportWidth, viewportHeight, format, quality }) {
   const sortedFrames = [...frames].sort((a, b) => a.scrollY - b.scrollY);
 
@@ -481,7 +644,7 @@ async function stitchFramesToDataUrl({ frames, viewportWidth, viewportHeight, fo
   const safeViewportWidth = Math.max(1, viewportWidth || firstBitmap.width);
   const safeViewportHeight = Math.max(1, viewportHeight || firstBitmap.height);
   const scale = firstBitmap.width / safeViewportWidth;
-  const minDeltaCss = Math.max(1, Math.round(safeViewportHeight * EXTENDED_MIN_STEP_RATIO));
+  const minDeltaCss = EXTENDED_MIN_STEP_PX;
   let stitchedHeightCss = safeViewportHeight;
 
   for (let index = 1; index < sortedFrames.length; index += 1) {
@@ -510,6 +673,7 @@ async function stitchFramesToDataUrl({ frames, viewportWidth, viewportHeight, fo
 
   // Draw first frame fully, then append only unseen lower portions from subsequent frames.
   const firstBitmapHeight = firstBitmap.height;
+  let prevSample = buildLumaSample(firstBitmap);
   context.drawImage(
     firstBitmap,
     0,
@@ -532,8 +696,18 @@ async function stitchFramesToDataUrl({ frames, viewportWidth, viewportHeight, fo
     const normalizedDelta = clamp(rawDelta, minDeltaCss, safeViewportHeight);
     const overlapCss = Math.max(0, safeViewportHeight - normalizedDelta);
     const bitmap = await fetchBitmap(frame.dataUrl);
-
-    const sourceY = clamp(Math.round(overlapCss * scale), 0, bitmap.height - 1);
+    const expectedSourceY = clamp(Math.round(overlapCss * scale), 0, bitmap.height - 1);
+    const searchRangePx = Math.max(2, Math.round(STITCH_ALIGNMENT_SEARCH_CSS * scale));
+    const minSourceY = clamp(expectedSourceY - searchRangePx, 0, bitmap.height - 1);
+    const maxSourceY = clamp(expectedSourceY + searchRangePx, 0, bitmap.height - 1);
+    const nextSample = buildLumaSample(bitmap);
+    const sourceY = findAlignedSourceY({
+      prevSample,
+      nextSample,
+      expectedSourceY,
+      minSourceY,
+      maxSourceY
+    });
     const sourceHeight = bitmap.height - sourceY;
     const remainingHeight = canvas.height - drawnBottomPx;
     const drawHeight = Math.min(sourceHeight, Math.max(remainingHeight, 0));
@@ -553,10 +727,31 @@ async function stitchFramesToDataUrl({ frames, viewportWidth, viewportHeight, fo
       drawnBottomPx += drawHeight;
     }
 
+    prevSample = nextSample;
     bitmap.close();
   }
 
-  const blob = await canvas.convertToBlob({
+  let outputCanvas = canvas;
+  if (drawnBottomPx > 0 && drawnBottomPx < canvas.height) {
+    const croppedCanvas = new OffscreenCanvas(canvas.width, drawnBottomPx);
+    const croppedContext = croppedCanvas.getContext("2d", { alpha: false });
+    if (croppedContext) {
+      croppedContext.drawImage(
+        canvas,
+        0,
+        0,
+        canvas.width,
+        drawnBottomPx,
+        0,
+        0,
+        canvas.width,
+        drawnBottomPx
+      );
+      outputCanvas = croppedCanvas;
+    }
+  }
+
+  const blob = await outputCanvas.convertToBlob({
     type: getMimeType(format),
     quality: format === "jpeg" ? (quality ?? 92) / 100 : undefined
   });
@@ -841,6 +1036,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       if (message?.type === "CAPTURE_PREVIEW") {
         const result = await captureAndPreview(message.payload || {});
+        sendResponse(result);
+        return;
+      }
+
+      if (message?.type === "CAPTURE_DELAYED_VISIBLE") {
+        const result = await captureVisibleWithDelay(message.payload || {});
         sendResponse(result);
         return;
       }

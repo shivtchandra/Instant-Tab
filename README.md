@@ -5,6 +5,7 @@ Chrome Manifest V3 extension for fast screenshots with instant preview.
 ## Features
 
 - Visible capture: click once -> open preview
+- Delayed visible capture (3 seconds): reopen dropdown/menu, then capture
 - Area capture: drag to select region -> open preview
 - Full-page capture: auto scroll + stitch -> open preview
 - Extended capture mode: manual scroll + auto frame capture -> stitch -> open preview
@@ -56,6 +57,7 @@ The extension records viewport frames while you scroll, then stitches them into 
 
 ## Notes and Limits
 
+- Delayed mode helps capture menus/dropdowns that close when extension popup opens.
 - Area mode captures a selected rectangle from the visible viewport.
 - Full-page mode captures by automatic vertical scrolling.
 - Extended mode captures only positions you manually scrolled to.

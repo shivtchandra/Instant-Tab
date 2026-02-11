@@ -9,7 +9,7 @@
   <body>
     <main class="container">
       <h1>Instant Screenshot</h1>
-      <p class="subtitle">One click captures and opens preview.</p>
+      <p class="subtitle">Capture instantly or use delayed mode for dropdowns.</p>
 
       <div class="controls">
         <label for="format">Format</label>
@@ -21,12 +21,14 @@
 
       <div class="actions">
         <button id="downloadBtn" class="primary">Capture Visible</button>
+        <button id="delayedBtn">Capture Visible (Delayed 3s)</button>
         <button id="areaBtn">Capture Area</button>
         <button id="fullPageBtn">Capture Full Page</button>
         <button id="extendedBtn">Extended: Start</button>
       </div>
 
       <p id="status" class="status" aria-live="polite"></p>
+      <p class="hint">Dropdown flow: click Delayed 3s, reopen dropdown, capture happens automatically.</p>
       <p class="hint">Area flow: click Capture Area, drag on page, release to preview.</p>
       <p class="hint">Extended flow: Start, scroll manually, reopen extension, then Finish.</p>
       <p class="hint">Use preview actions to copy image or download to Screenshots folders.</p>

@@ -450,3 +450,82 @@ footer {
     font-size: 2.2rem;
   }
 }
+
+/* Privacy Policy Page Styles */
+.policy-page {
+  padding-top: 10rem;
+  padding-bottom: 6rem;
+  min-height: 80vh;
+}
+
+.policy-content {
+  padding: 4rem;
+  border-radius: var(--radius-lg);
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.policy-content h1 {
+  font-size: 3.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.last-updated {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin-bottom: 3rem;
+  font-weight: 500;
+}
+
+.policy-content section {
+  margin-bottom: 2.5rem;
+}
+
+.policy-content h2 {
+  font-size: 1.8rem;
+  margin-bottom: 1.2rem;
+  color: var(--text-main);
+}
+
+.policy-content p {
+  color: var(--text-dim);
+  margin-bottom: 1rem;
+  line-height: 1.8;
+}
+
+.policy-content ul {
+  margin-left: 1.5rem;
+  margin-bottom: 1.5rem;
+  color: var(--text-dim);
+}
+
+.policy-content ul li {
+  margin-bottom: 0.8rem;
+}
+
+.policy-content .link {
+  color: var(--accent-sage);
+  text-decoration: none;
+  font-weight: 600;
+  transition: var(--transition);
+}
+
+.policy-content .link:hover {
+  color: var(--accent-sage-dark);
+  text-decoration: underline;
+}
+
+.btn.small {
+  padding: 0.7rem 1.4rem;
+  font-size: 0.85rem;
+}
+
+@media (max-width: 768px) {
+  .policy-content {
+    padding: 2rem;
+  }
+
+  .policy-content h1 {
+    font-size: 2.5rem;
+  }
+}

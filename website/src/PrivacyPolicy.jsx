@@ -42,9 +42,11 @@ function PrivacyPolicy() {
                     </p>
                     <ul>
                         <li><strong>activeTab:</strong> To capture the content of the tab you are currently viewing.</li>
-                        <li><strong>tabCapture / desktopCapture:</strong> To facilitate the screenshot process.</li>
+                        <li><strong>tabs:</strong> To identify which tab is being captured for accurate processing.</li>
+                        <li><strong>downloads:</strong> To allow you to save screenshots directly to your device.</li>
+                        <li><strong>scripting:</strong> To perform local pixel calculations for the selection and full-page capture tools.</li>
                         <li><strong>clipboardWrite:</strong> To allow you to copy screenshots directly to your clipboard.</li>
-                        <li><strong>storage:</strong> To save your preferred settings (like capture mode or file format) locally.</li>
+                        <li><strong>storage:</strong> To save your preferred settings (like capture mode or file format) locally on your device.</li>
                     </ul>
                 </section>
 

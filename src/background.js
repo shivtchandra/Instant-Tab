@@ -1,19 +1,27 @@
 const DEFAULT_FORMAT = "png";
+const STITCH_SOURCE_FORMAT = "png";
 const MAX_CANVAS_EDGE = 32767;
-const FULL_PAGE_SCROLL_DELAY_MS = 160;
-const EXTENDED_DEDUPE_PX = 24;
-const EXTENDED_MIN_STEP_PX = 1;
-const EXTENDED_MAX_PENDING_REQUESTS = 12;
-const STITCH_ALIGNMENT_SEARCH_CSS = 96;
-const STITCH_ALIGNMENT_STRIP_CSS = 56;
+const CAPTURE_MIN_INTERVAL_MS = 550;
+const CAPTURE_RETRY_ON_QUOTA_MS = 800;
+const FULL_PAGE_SCROLL_DELAY_MS = 260;
+const FULL_PAGE_SCROLL_STEP_RATIO = 0.85;
+const EXTENDED_DEDUPE_PX = 16;
+const EXTENDED_MIN_STEP_PX = 3;
+const EXTENDED_MAX_PENDING_REQUESTS = 20;
+const STITCH_ALIGNMENT_SEARCH_CSS = 48;
+const STITCH_ALIGNMENT_MAX_BACKTRACK_CSS = 2;
 const STITCH_ALIGNMENT_SAMPLE_WIDTH = 320;
 const STITCH_ALIGNMENT_SAMPLE_STEP_X = 3;
+const STITCH_ALIGNMENT_DISTANCE_PENALTY = 0.18;
+const STITCH_ALIGNMENT_BAD_SCORE = 42;
 const PREVIEW_RETENTION_MS = 10 * 60 * 1000;
 const DEFAULT_DELAY_MS = 3000;
 
 const extendedSessions = new Map();
 const previewPayloads = new Map();
 const areaCaptureConfigs = new Map();
+let captureQueue = Promise.resolve();
+let lastCaptureAt = 0;
 
 function buildFilename(extension = DEFAULT_FORMAT, mode = "visible") {
   const now = new Date();
@@ -46,6 +54,32 @@ function toCaptureOptions({ format = DEFAULT_FORMAT, quality } = {}) {
   }
 
   return { format };
+}
+
+function isCaptureQuotaError(error) {
+  const message = String(error?.message || error || "");
+  return message.includes("MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND");
+}
+
+async function throttledCapture(windowId, options, retriesLeft = 1) {
+  const now = Date.now();
+  const waitMs = Math.max(0, CAPTURE_MIN_INTERVAL_MS - (now - lastCaptureAt));
+  if (waitMs > 0) {
+    await wait(waitMs);
+  }
+
+  try {
+    const result = await chrome.tabs.captureVisibleTab(windowId, options);
+    lastCaptureAt = Date.now();
+    return result;
+  } catch (error) {
+    if (retriesLeft > 0 && isCaptureQuotaError(error)) {
+      await wait(CAPTURE_RETRY_ON_QUOTA_MS);
+      return throttledCapture(windowId, options, retriesLeft - 1);
+    }
+
+    throw error;
+  }
 }
 
 function generatePreviewId() {
@@ -126,7 +160,10 @@ function buildCaptureResponse({ filename, mode, frameCount }) {
 }
 
 async function captureVisibleTab({ windowId, format = DEFAULT_FORMAT, quality } = {}) {
-  return chrome.tabs.captureVisibleTab(windowId, toCaptureOptions({ format, quality }));
+  const options = toCaptureOptions({ format, quality });
+  const run = async () => throttledCapture(windowId, options);
+  captureQueue = captureQueue.then(run, run);
+  return captureQueue;
 }
 
 async function getActiveTab() {
@@ -214,6 +251,86 @@ async function fetchBitmap(dataUrl) {
   const response = await fetch(dataUrl);
   const blob = await response.blob();
   return createImageBitmap(blob);
+}
+
+async function hideFixedAndStickyUi(tabId) {
+  return runInTab(tabId, () => {
+    const STYLE_ID = "__instant_capture_hide_style";
+    const CLASS_NAME = "__instant_capture_hide_fixed";
+    const ATTR = "data-instant-capture-hidden";
+
+    if (!document.getElementById(STYLE_ID)) {
+      const style = document.createElement("style");
+      style.id = STYLE_ID;
+      style.textContent = `
+        .${CLASS_NAME} {
+          visibility: hidden !important;
+          opacity: 0 !important;
+          pointer-events: none !important;
+        }
+      `;
+      (document.head || document.documentElement).appendChild(style);
+    }
+
+    let hiddenCount = 0;
+    const elements = document.querySelectorAll("*");
+    for (const el of elements) {
+      if (!(el instanceof HTMLElement)) {
+        continue;
+      }
+
+      const style = window.getComputedStyle(el);
+      if (style.position !== "fixed" && style.position !== "sticky") {
+        continue;
+      }
+
+      if (style.display === "none" || style.visibility === "hidden") {
+        continue;
+      }
+
+      if (el.offsetWidth <= 0 || el.offsetHeight <= 0) {
+        continue;
+      }
+
+      const rect = el.getBoundingClientRect();
+      const intersectsViewport =
+        rect.bottom > 0 &&
+        rect.top < window.innerHeight &&
+        rect.right > 0 &&
+        rect.left < window.innerWidth;
+
+      if (!intersectsViewport) {
+        continue;
+      }
+
+      if (!el.hasAttribute(ATTR)) {
+        el.setAttribute(ATTR, "1");
+        el.classList.add(CLASS_NAME);
+        hiddenCount += 1;
+      }
+    }
+
+    return hiddenCount;
+  }).catch(() => 0);
+}
+
+async function restoreFixedAndStickyUi(tabId) {
+  return runInTab(tabId, () => {
+    const CLASS_NAME = "__instant_capture_hide_fixed";
+    const ATTR = "data-instant-capture-hidden";
+
+    let restored = 0;
+    const nodes = document.querySelectorAll(`[${ATTR}="1"]`);
+    for (const el of nodes) {
+      if (el instanceof HTMLElement) {
+        el.classList.remove(CLASS_NAME);
+        el.removeAttribute(ATTR);
+        restored += 1;
+      }
+    }
+
+    return restored;
+  }).catch(() => 0);
 }
 
 function toFriendlyCaptureError(error) {
@@ -446,8 +563,7 @@ async function captureExtendedFrame(session, fallbackScrollY) {
 
   const dataUrl = await captureVisibleTab({
     windowId: session.windowId,
-    format: session.format,
-    quality: session.quality
+    format: session.captureFormat
   });
 
   session.frames.push({ scrollY: normalizedY, dataUrl });
@@ -548,14 +664,14 @@ function buildLumaSample(bitmap) {
   };
 }
 
-function scoreLumaOverlap({ prevSample, nextSample, cutRow, stripRows }) {
+function scoreLumaTopOverlap({ prevSample, nextSample, overlapRows }) {
   const width = Math.min(prevSample.width, nextSample.width);
-  const prevStart = prevSample.height - stripRows;
-  const nextStart = cutRow - stripRows;
+  const prevStart = prevSample.height - overlapRows;
+  const nextStart = 0;
   let total = 0;
   let samples = 0;
 
-  for (let y = 0; y < stripRows; y += 1) {
+  for (let y = 0; y < overlapRows; y += 1) {
     const prevRow = (prevStart + y) * prevSample.width;
     const nextRow = (nextStart + y) * nextSample.width;
 
@@ -572,65 +688,53 @@ function scoreLumaOverlap({ prevSample, nextSample, cutRow, stripRows }) {
 function findAlignedSourceY({
   prevSample,
   nextSample,
-  expectedSourceY,
-  minSourceY,
-  maxSourceY
+  expectedSourceY
 }) {
   if (!prevSample || !nextSample) {
     return expectedSourceY;
   }
 
-  const expectedCut = clamp(
-    Math.round(expectedSourceY * nextSample.scaleY),
-    1,
-    nextSample.height - 1
-  );
-  const minCut = clamp(
-    Math.round(minSourceY * nextSample.scaleY),
-    1,
-    nextSample.height - 1
-  );
-  const maxCut = clamp(
-    Math.round(maxSourceY * nextSample.scaleY),
-    1,
-    nextSample.height - 1
-  );
-  const low = Math.min(minCut, maxCut);
-  const high = Math.max(minCut, maxCut);
-
-  if (low >= high) {
+  const maxOverlapRows = Math.min(prevSample.height - 1, nextSample.height - 1);
+  if (maxOverlapRows < 2) {
     return expectedSourceY;
   }
 
-  const baseStripRows = clamp(
-    Math.round(STITCH_ALIGNMENT_STRIP_CSS * nextSample.scaleY),
-    6,
-    Math.max(6, Math.min(prevSample.height - 1, nextSample.height - 1))
+  const minOverlapRows = 2;
+  const expectedOverlapRows = clamp(
+    Math.round(expectedSourceY * nextSample.scaleY),
+    minOverlapRows,
+    maxOverlapRows
   );
-  let bestCut = expectedCut;
+  let bestOverlapRows = expectedOverlapRows;
   let bestScore = Number.POSITIVE_INFINITY;
 
-  for (let cut = low; cut <= high; cut += 1) {
-    const stripRows = Math.min(baseStripRows, prevSample.height - 1, cut);
-    if (stripRows < 4) {
-      continue;
-    }
-
-    const score = scoreLumaOverlap({
+  for (let overlapRows = minOverlapRows; overlapRows <= maxOverlapRows; overlapRows += 1) {
+    const score = scoreLumaTopOverlap({
       prevSample,
       nextSample,
-      cutRow: cut,
-      stripRows
+      overlapRows
     });
+    const distancePenalty =
+      Math.abs(overlapRows - expectedOverlapRows) * STITCH_ALIGNMENT_DISTANCE_PENALTY;
+    const weightedScore = score + distancePenalty;
 
-    if (score < bestScore) {
-      bestScore = score;
-      bestCut = cut;
+    if (weightedScore < bestScore) {
+      bestScore = weightedScore;
+      bestOverlapRows = overlapRows;
     }
   }
 
-  const aligned = Math.round(bestCut / nextSample.scaleY);
-  return clamp(aligned, minSourceY, maxSourceY);
+  if (!Number.isFinite(bestScore)) {
+    return expectedSourceY;
+  }
+
+  if (bestScore > STITCH_ALIGNMENT_BAD_SCORE) {
+    // If matching confidence is low, fall back to expected seam instead of risking overlaps.
+    return expectedSourceY;
+  }
+
+  const aligned = Math.round(bestOverlapRows / nextSample.scaleY);
+  return clamp(aligned, 0, Math.max(0, Math.round(nextSample.height / nextSample.scaleY) - 1));
 }
 
 async function stitchFramesToDataUrl({ frames, viewportWidth, viewportHeight, format, quality }) {
@@ -697,17 +801,17 @@ async function stitchFramesToDataUrl({ frames, viewportWidth, viewportHeight, fo
     const overlapCss = Math.max(0, safeViewportHeight - normalizedDelta);
     const bitmap = await fetchBitmap(frame.dataUrl);
     const expectedSourceY = clamp(Math.round(overlapCss * scale), 0, bitmap.height - 1);
-    const searchRangePx = Math.max(2, Math.round(STITCH_ALIGNMENT_SEARCH_CSS * scale));
-    const minSourceY = clamp(expectedSourceY - searchRangePx, 0, bitmap.height - 1);
-    const maxSourceY = clamp(expectedSourceY + searchRangePx, 0, bitmap.height - 1);
     const nextSample = buildLumaSample(bitmap);
-    const sourceY = findAlignedSourceY({
+    const maxBacktrackPx = Math.max(1, Math.round(STITCH_ALIGNMENT_MAX_BACKTRACK_CSS * scale));
+    const maxSearchPx = Math.max(2, Math.round(STITCH_ALIGNMENT_SEARCH_CSS * scale));
+    let sourceY = findAlignedSourceY({
       prevSample,
       nextSample,
-      expectedSourceY,
-      minSourceY,
-      maxSourceY
+      expectedSourceY
     });
+    // Bound seam near expected to avoid extreme jumps from repeated patterns.
+    sourceY = clamp(sourceY, expectedSourceY - maxBacktrackPx, expectedSourceY + maxSearchPx);
+    sourceY = clamp(sourceY, 0, bitmap.height - 1);
     const sourceHeight = bitmap.height - sourceY;
     const remainingHeight = canvas.height - drawnBottomPx;
     const drawHeight = Math.min(sourceHeight, Math.max(remainingHeight, 0));
@@ -781,6 +885,7 @@ async function startExtendedCapture({ format = DEFAULT_FORMAT, quality } = {}) {
     windowId: tab.windowId,
     format,
     quality,
+    captureFormat: STITCH_SOURCE_FORMAT,
     viewportWidth: pageInfo.viewportWidth,
     viewportHeight: pageInfo.viewportHeight,
     frames: [],
@@ -796,6 +901,7 @@ async function startExtendedCapture({ format = DEFAULT_FORMAT, quality } = {}) {
       target: { tabId: tab.id },
       files: ["src/extended-tracker.js"]
     });
+    await hideFixedAndStickyUi(tab.id);
 
     await enqueueExtendedCapture(session, pageInfo.scrollY);
     await waitForExtendedIdle(session);
@@ -807,6 +913,7 @@ async function startExtendedCapture({ format = DEFAULT_FORMAT, quality } = {}) {
       message: "Extended capture started. Scroll the page, then click finish in the popup."
     };
   } catch (error) {
+    await restoreFixedAndStickyUi(tab.id);
     extendedSessions.delete(tab.id);
     throw toFriendlyCaptureError(error);
   }
@@ -816,6 +923,7 @@ async function stopExtendedTracking(tabId) {
   await chrome.tabs.sendMessage(tabId, { type: "STOP_EXTENDED_TRACKER" }).catch(() => {
     // Ignore if tracker script is unavailable.
   });
+  await restoreFixedAndStickyUi(tabId);
 }
 
 async function finishExtendedCapture() {
@@ -920,8 +1028,9 @@ async function captureFullPageDataUrl({ format = DEFAULT_FORMAT, quality } = {})
   }
 
   const maxScrollY = Math.max(pageInfo.fullHeight - pageInfo.viewportHeight, 0);
+  const stepY = Math.max(1, Math.round(pageInfo.viewportHeight * FULL_PAGE_SCROLL_STEP_RATIO));
   const scrollPositions = [];
-  for (let y = 0; y <= maxScrollY; y += pageInfo.viewportHeight) {
+  for (let y = 0; y <= maxScrollY; y += stepY) {
     scrollPositions.push(y);
   }
   if (scrollPositions[scrollPositions.length - 1] !== maxScrollY) {
@@ -933,13 +1042,18 @@ async function captureFullPageDataUrl({ format = DEFAULT_FORMAT, quality } = {})
   let stitchedViewportHeight = pageInfo.viewportHeight;
 
   try {
+    await hideFixedAndStickyUi(tabId);
+
     for (const y of scrollPositions) {
       await runInTab(tabId, (targetY) => {
         window.scrollTo(0, targetY);
       }, [y]);
 
       await wait(FULL_PAGE_SCROLL_DELAY_MS);
-      const frameDataUrl = await captureVisibleTab({ windowId: tab.windowId, format, quality });
+      const frameDataUrl = await captureVisibleTab({
+        windowId: tab.windowId,
+        format: STITCH_SOURCE_FORMAT
+      });
       const live = await getLiveScrollSnapshot(tabId);
       const liveY = Math.max(0, Math.round(live?.scrollY ?? y));
 
@@ -953,6 +1067,7 @@ async function captureFullPageDataUrl({ format = DEFAULT_FORMAT, quality } = {})
       frames.push({ scrollY: liveY, dataUrl: frameDataUrl });
     }
   } finally {
+    await restoreFixedAndStickyUi(tabId);
     await runInTab(tabId, (x, y) => {
       window.scrollTo(x, y);
     }, [pageInfo.scrollX, pageInfo.scrollY]).catch(() => {

@@ -12,6 +12,8 @@ function ScrollToTop() {
   return null;
 }
 
+const EXTENSION_URL = "https://chromewebstore.google.com/detail/nfjacblekofgmkigcfonfdgabjedkdao?utm_source=item-share-cb";
+
 const navLinks = [
   { name: "Features", href: "/#features" },
   { name: "Workflow", href: "/#workflow" },
@@ -111,7 +113,7 @@ function Navbar() {
           )
         ))}
       </div>
-      <a href="/#download" className="btn btn-primary">
+      <a href={EXTENSION_URL} target="_blank" rel="noopener noreferrer" className="btn btn-primary">
         Get Extension
       </a>
     </nav>
@@ -128,7 +130,7 @@ function Hero() {
         A two-click workflow that fits perfectly into your high-volume capture routine.
       </p>
       <div className="hero-actions">
-        <a href="#download" className="btn btn-primary">Add to Chrome</a>
+        <a href={EXTENSION_URL} target="_blank" rel="noopener noreferrer" className="btn btn-primary">Add to Chrome</a>
         <a href="#workflow" className="btn btn-outline">See how it works</a>
       </div>
     </section>
@@ -210,7 +212,7 @@ function Home() {
         <div className="cta-banner">
           <h2 className="text-gradient">Ready to supercharge your workflow?</h2>
           <p>Join thousands of users who capture the web with Instant Tab Screenshot.</p>
-          <a href="#download" className="btn btn-primary" style={{ padding: "1rem 2rem", fontSize: "1.1rem" }}>
+          <a href={EXTENSION_URL} target="_blank" rel="noopener noreferrer" className="btn btn-primary" style={{ padding: "1rem 2rem", fontSize: "1.1rem" }}>
             Add to Chrome — It's Free
           </a>
         </div>
@@ -252,7 +254,7 @@ function Footer() {
             <ul>
               <li><a href="#">Twitter</a></li>
               <li><a href="#">GitHub</a></li>
-              <li><a href="#">Chrome Store</a></li>
+              <li><a href={EXTENSION_URL} target="_blank" rel="noopener noreferrer">Chrome Store</a></li>
             </ul>
           </div>
         </div>

@@ -46,10 +46,10 @@ function sendMessage(type, payload = undefined) {
 
 function refreshExtendedButton() {
   if (extendedActive) {
-    extendedBtn.textContent = "Extended: Finish";
+    extendedBtn.textContent = "Long Capture: Finish";
     extendedBtn.classList.add("active");
   } else {
-    extendedBtn.textContent = "Extended: Start";
+    extendedBtn.textContent = "Long Capture: Start";
     extendedBtn.classList.remove("active");
   }
 }
@@ -103,7 +103,7 @@ async function runAction(type, loadingLabel, successLabel, payload = undefined) 
 downloadBtn.addEventListener("click", async () => {
   await runAction(
     "CAPTURE_DOWNLOAD",
-    "Capturing visible area...",
+    "Capturing current view...",
     () => "Preview opened. Copy or download from preview."
   );
 });
@@ -137,7 +137,7 @@ areaBtn.addEventListener("click", async () => {
 fullPageBtn.addEventListener("click", async () => {
   await runAction(
     "CAPTURE_FULL_PAGE_DOWNLOAD",
-    "Capturing full page...",
+    "Capturing full page (auto-scroll)...",
     () => "Preview opened. Copy or download from preview."
   );
 });
@@ -146,8 +146,8 @@ extendedBtn.addEventListener("click", async () => {
   if (!extendedActive) {
     const response = await runAction(
       "START_EXTENDED_CAPTURE",
-      "Starting extended capture...",
-      () => "Extended started. Scroll page, then reopen extension to finish."
+      "Starting long capture...",
+      () => "Long capture started. Scroll page, then reopen extension to finish."
     );
 
     if (response?.ok) {
@@ -160,7 +160,7 @@ extendedBtn.addEventListener("click", async () => {
 
   const response = await runAction(
     "FINISH_EXTENDED_CAPTURE",
-    "Finishing and stitching extended capture...",
+    "Finishing and stitching long capture...",
     (result) => `Preview opened (${result.frameCount} frames). Copy or download there.`,
     NO_PAYLOAD
   );
